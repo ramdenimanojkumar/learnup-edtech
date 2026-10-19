@@ -400,7 +400,82 @@ export const initialLearningProgress = [
 
 // In-memory working copy for frontend demo session.
 // Notice: We strictly DO NOT persist this to localStorage, cookies, or databases.
-export let learningProgress = [...initialLearningProgress];
+export const learningProgress = initialLearningProgress.map(item => ({ ...item }));
+
+/**
+ * Check if a course is currently enrolled in memory.
+ * @param {number|string} courseId
+ * @returns {boolean}
+ */
+export function isEnrolled(courseId) {
+  const numericId = Number(courseId);
+  if (isNaN(numericId)) return false;
+  return learningProgress.some(item => item.courseId === numericId);
+}
+
+/**
+ * Enroll in a course, adding it to the shared in-memory learningProgress state.
+ * Prevents duplicate enrollments.
+ * @param {number|string} courseId
+ * @returns {{ success: boolean, alreadyEnrolled: boolean, message: string, record?: object }}
+ */
+export function enrollCourse(courseId) {
+  const numericId = Number(courseId);
+  if (isNaN(numericId)) {
+    return { success: false, alreadyEnrolled: false, message: "Invalid course ID." };
+  }
+
+  if (isEnrolled(numericId)) {
+    return { success: false, alreadyEnrolled: true, message: "Already enrolled in this course." };
+  }
+
+  const course = getCourseById(numericId);
+  if (!course) {
+    return { success: false, alreadyEnrolled: false, message: "Course not found." };
+  }
+
+  const newRecord = {
+    courseId: numericId,
+    completedLessons: 0,
+    totalLessons: course.lessons || 10,
+    lastAccessed: "Just now"
+  };
+
+  // Prepend so newly enrolled course appears at the top of the dashboard
+  learningProgress.unshift(newRecord);
+
+  return {
+    success: true,
+    alreadyEnrolled: false,
+    message: `Successfully enrolled in ${course.title}!`,
+    record: newRecord
+  };
+}
+
+/**
+ * Returns current enrolled progress array.
+ * @returns {Array}
+ */
+export function getLearningProgress() {
+  return learningProgress;
+}
+
+/**
+ * Clears in-memory enrollments for testing empty states.
+ */
+export function clearLearningProgress() {
+  learningProgress.length = 0;
+}
+
+/**
+ * Restores initial sample enrollments.
+ */
+export function restoreSampleLearningProgress() {
+  learningProgress.length = 0;
+  for (const item of initialLearningProgress) {
+    learningProgress.push({ ...item });
+  }
+}
 
 /**
  * Helper function to look up a course by ID.
@@ -427,4 +502,22 @@ export function getCourseCategories() {
  */
 export function getCourseDifficulties() {
   return [...new Set(courses.map(course => course.difficulty))];
+}
+
+// Sync enrollment from URL search query parameter (e.g. ?enrolled=3) on initial load
+if (typeof window !== "undefined" && window.location && window.location.search) {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const enrolledParam = params.get("enrolled");
+    if (enrolledParam) {
+      const ids = enrolledParam.split(",").map(Number);
+      for (const id of ids) {
+        if (!isNaN(id) && !isEnrolled(id)) {
+          enrollCourse(id);
+        }
+      }
+    }
+  } catch (_) {
+    // Ignore URL parse errors in non-browser environments
+  }
 }

@@ -11,7 +11,9 @@ import {
   benefits,
   learningProgress,
   getCourseCategories,
-  getCourseDifficulties
+  getCourseDifficulties,
+  restoreSampleLearningProgress,
+  clearLearningProgress
 } from "./data.js";
 
 import {
@@ -25,13 +27,11 @@ import {
   escapeHtml
 } from "./components.js";
 
-// Detect active page from body data attribute
-const page = document.body.dataset.page || "home";
-const content = document.querySelector("#page-content");
+import { initCourseDetails } from "./course-details.js";
 
-// Initialize shared Header and Footer
-renderHeader(page);
-renderFooter();
+if (typeof window !== "undefined") {
+  window.__learnup_main_loaded = true;
+}
 
 /**
  * --------------------------------------------------------------------------
@@ -39,6 +39,7 @@ renderFooter();
  * --------------------------------------------------------------------------
  */
 function renderHome() {
+  const content = document.querySelector("#page-content");
   if (!content) return;
 
   const popularCourses = courses.slice(0, 3);
@@ -187,6 +188,7 @@ function renderHome() {
  * --------------------------------------------------------------------------
  */
 function renderCourses() {
+  const content = document.querySelector("#page-content");
   if (!content) return;
 
   const allCategories = getCourseCategories();
@@ -370,14 +372,16 @@ function renderCourses() {
  * Learning Dashboard View
  * --------------------------------------------------------------------------
  */
+let isDashboardEmptySimulated = false;
+
 function renderDashboard() {
+  const content = document.querySelector("#page-content");
   if (!content) return;
 
-  // In-memory working array for dashboard demonstration
-  // Allows testing both populated enrolled state and empty state
-  let currentEnrolled = [...learningProgress];
-
   function drawDashboard() {
+    // Read directly from shared in-memory learningProgress unless empty state is simulated
+    const currentEnrolled = isDashboardEmptySimulated ? [] : learningProgress;
+
     // Calculate dashboard overview statistics
     const totalEnrolled = currentEnrolled.length;
     const totalCompletedLessons = currentEnrolled.reduce((sum, item) => sum + item.completedLessons, 0);
@@ -429,7 +433,7 @@ function renderDashboard() {
           <div class="dashboard-controls-bar">
             <div class="dashboard-title-group">
               <h2>Courses in Progress</h2>
-              <p>Demo notice: Learning progress is frontend simulated and not persisted.</p>
+              <p>Demo notice: Learning progress is frontend simulated and stored in shared memory.</p>
             </div>
 
             <!-- Demo Toggle button to allow reviewer to test empty state and populated state -->
@@ -506,10 +510,9 @@ function renderDashboard() {
     const toggleBtn = document.querySelector("#toggle-demo-enrolled-btn");
     if (toggleBtn) {
       toggleBtn.addEventListener("click", () => {
-        if (currentEnrolled.length > 0) {
-          currentEnrolled = [];
-        } else {
-          currentEnrolled = [...learningProgress];
+        isDashboardEmptySimulated = !isDashboardEmptySimulated;
+        if (!isDashboardEmptySimulated && learningProgress.length === 0) {
+          restoreSampleLearningProgress();
         }
         drawDashboard();
       });
@@ -521,33 +524,97 @@ function renderDashboard() {
 
 /**
  * --------------------------------------------------------------------------
- * Router / Page Switch
+ * Router & Client-Side Navigation
  * --------------------------------------------------------------------------
  */
-switch (page) {
-  case "courses":
-    renderCourses();
-    break;
-
-  case "dashboard":
-    renderDashboard();
-    break;
-
-  case "course-details":
-    // Dynamically load course-details module as fallback if main.js is loaded
-    import("./course-details.js")
-      .then(module => {
-        if (module && typeof module.initCourseDetails === "function") {
-          module.initCourseDetails();
-        }
-      })
-      .catch(err => {
-        console.error("Error loading course details module:", err);
-      });
-    break;
-
-  case "home":
-  default:
-    renderHome();
-    break;
+export function getPageFromUrl(href) {
+  try {
+    const url = new URL(href, typeof window !== "undefined" ? window.location.href : "http://localhost");
+    const path = url.pathname.toLowerCase();
+    if (path.endsWith("courses.html") || path.endsWith("/courses")) return "courses";
+    if (path.endsWith("dashboard.html") || path.endsWith("/dashboard")) return "dashboard";
+    if (path.endsWith("course-details.html") || path.endsWith("/course-details")) return "course-details";
+    if (path.endsWith("index.html") || path.endsWith("/") || path === "") return "home";
+  } catch (_) {}
+  return "home";
 }
+
+export function renderActivePage(targetPage) {
+  if (typeof document === "undefined") return;
+  document.body.dataset.page = targetPage;
+  renderHeader(targetPage === "course-details" ? "courses" : targetPage);
+
+  switch (targetPage) {
+    case "courses":
+      renderCourses();
+      break;
+    case "dashboard":
+      renderDashboard();
+      break;
+    case "course-details":
+      initCourseDetails();
+      break;
+    case "home":
+    default:
+      renderHome();
+      break;
+  }
+}
+
+export function navigateTo(href, push = true) {
+  const targetPage = getPageFromUrl(href);
+  if (push && typeof window !== "undefined" && window.history) {
+    window.history.pushState({}, "", href);
+  }
+  renderActivePage(targetPage);
+  if (typeof window !== "undefined") {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
+// Client-side link interception to maintain shared in-memory state without page reloads
+if (typeof document !== "undefined") {
+  document.addEventListener("click", e => {
+    const link = e.target.closest("a");
+    if (!link) return;
+    const href = link.getAttribute("href");
+    if (!href) return;
+
+    // Ignore anchors, external links, protocols
+    if (
+      href.startsWith("#") ||
+      href.startsWith("http://") ||
+      href.startsWith("https://") ||
+      href.startsWith("mailto:") ||
+      href.startsWith("tel:") ||
+      href.startsWith("javascript:")
+    ) {
+      return;
+    }
+
+    // Intercept internal page navigation (.html or relative paths)
+    if (
+      href.includes(".html") ||
+      href.startsWith("./") ||
+      href.startsWith("/")
+    ) {
+      e.preventDefault();
+      navigateTo(href);
+    }
+  });
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("popstate", () => {
+      const targetPage = getPageFromUrl(window.location.href);
+      renderActivePage(targetPage);
+    });
+  }
+}
+
+// Initial Boot: Detect active page from body data attribute or URL
+const initialPage = (typeof document !== "undefined" && document.body && document.body.dataset.page) ||
+  getPageFromUrl(typeof window !== "undefined" ? window.location.href : "");
+
+renderHeader(initialPage === "course-details" ? "courses" : initialPage);
+renderFooter();
+renderActivePage(initialPage);

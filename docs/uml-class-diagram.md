@@ -79,6 +79,11 @@ classDiagram
         +getCourseById(id) Course
         +getCourseCategories() string[]
         +getCourseDifficulties() string[]
+        +isEnrolled(courseId) boolean
+        +enrollCourse(courseId) object
+        +getLearningProgress() LearningProgress[]
+        +clearLearningProgress() void
+        +restoreSampleLearningProgress() void
     }
 
     class ComponentsModule {

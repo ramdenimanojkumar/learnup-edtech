@@ -5,7 +5,7 @@
  * and frontend-only enrollment interactions.
  */
 
-import { courses, getCourseById } from "./data.js";
+import { courses, getCourseById, isEnrolled, enrollCourse } from "./data.js";
 import {
   renderHeader,
   renderFooter,
@@ -81,6 +81,7 @@ function renderCourseNotFound(container, reason) {
  * @param {object} course
  */
 function renderCourseView(container, course) {
+  const currentlyEnrolled = isEnrolled(course.id);
   const safeTitle = escapeHtml(course.title);
   const safeCat = escapeHtml(course.category);
   const safeDiff = escapeHtml(course.difficulty);
@@ -251,15 +252,42 @@ function renderCourseView(container, course) {
             <div class="sidebar-price-tag">Free Access</div>
             <p class="sidebar-demo-badge">Frontend Demonstration Project</p>
 
-            <button
-              type="button"
-              class="btn btn-primary btn-block btn-lg"
-              id="enroll-btn"
-            >
-              Enroll Now &bull; Free
-            </button>
-
-            <div id="enrollment-feedback" aria-live="polite"></div>
+            ${currentlyEnrolled ? `
+              <button
+                type="button"
+                class="btn btn-secondary btn-block btn-lg"
+                id="enroll-btn"
+                disabled
+                aria-disabled="true"
+              >
+                ✓ Enrolled (In Progress)
+              </button>
+              <div id="enrollment-feedback" aria-live="polite">
+                <div class="enrollment-alert enrollment-alert-info" role="status">
+                  <span style="font-size: 1.2rem;" aria-hidden="true">ℹ️</span>
+                  <div>
+                    <strong>You are already enrolled in this course!</strong>
+                    <p style="margin-top: 4px; font-size: 0.85rem;">
+                      You are currently progressing through this course. View your progress or continue lessons in My Learning.
+                    </p>
+                    <div style="margin-top: 10px;">
+                      <a href="./dashboard.html" class="btn btn-sm btn-primary">
+                        Go to My Learning &rarr;
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ` : `
+              <button
+                type="button"
+                class="btn btn-primary btn-block btn-lg"
+                id="enroll-btn"
+              >
+                Enroll Now &bull; Free
+              </button>
+              <div id="enrollment-feedback" aria-live="polite"></div>
+            `}
 
             <ul class="sidebar-features-list">
               <li class="sidebar-feature-item">
@@ -295,37 +323,66 @@ function renderCourseView(container, course) {
   const enrollBtn = container.querySelector("#enroll-btn");
   const feedbackContainer = container.querySelector("#enrollment-feedback");
 
-  if (enrollBtn && feedbackContainer) {
+  if (enrollBtn && feedbackContainer && !currentlyEnrolled) {
     enrollBtn.addEventListener("click", () => {
-      // Toggle enrolled status in frontend
-      enrollBtn.textContent = "✓ Enrolled (In Progress)";
-      enrollBtn.classList.remove("btn-primary");
-      enrollBtn.classList.add("btn-secondary");
-      enrollBtn.setAttribute("disabled", "true");
+      // Add to shared in-memory state and prevent duplicates
+      const result = enrollCourse(course.id);
 
-      feedbackContainer.innerHTML = `
-        <div class="enrollment-alert enrollment-alert-success" role="status">
-          <span style="font-size: 1.2rem;" aria-hidden="true">🎉</span>
-          <div>
-            <strong>You're enrolled in ${safeTitle}!</strong>
-            <p style="margin-top: 4px; font-size: 0.85rem;">
-              You can now explore the curriculum lessons and track your progress in the Learning Dashboard.
-            </p>
-            <div style="margin-top: 10px;">
-              <a href="./dashboard.html" class="btn btn-sm btn-primary">
-                Go to My Learning &rarr;
-              </a>
+      if (result.success) {
+        enrollBtn.textContent = "✓ Enrolled (In Progress)";
+        enrollBtn.classList.remove("btn-primary");
+        enrollBtn.classList.add("btn-secondary");
+        enrollBtn.setAttribute("disabled", "true");
+        enrollBtn.setAttribute("aria-disabled", "true");
+
+        feedbackContainer.innerHTML = `
+          <div class="enrollment-alert enrollment-alert-success" role="status">
+            <span style="font-size: 1.2rem;" aria-hidden="true">🎉</span>
+            <div>
+              <strong>You're enrolled in ${safeTitle}!</strong>
+              <p style="margin-top: 4px; font-size: 0.85rem;">
+                This course has been added to your in-memory learning dashboard. You can now track your progress!
+              </p>
+              <div style="margin-top: 10px;">
+                <a href="./dashboard.html?enrolled=${course.id}" class="btn btn-sm btn-primary">
+                  Go to My Learning &rarr;
+                </a>
+              </div>
             </div>
           </div>
-        </div>
-      `;
+        `;
+      } else if (result.alreadyEnrolled) {
+        enrollBtn.textContent = "✓ Enrolled (In Progress)";
+        enrollBtn.setAttribute("disabled", "true");
+        enrollBtn.setAttribute("aria-disabled", "true");
+        feedbackContainer.innerHTML = `
+          <div class="enrollment-alert enrollment-alert-info" role="status">
+            <span style="font-size: 1.2rem;" aria-hidden="true">ℹ️</span>
+            <div>
+              <strong>Already Enrolled</strong>
+              <p style="margin-top: 4px; font-size: 0.85rem;">You are already enrolled in this course.</p>
+              <div style="margin-top: 10px;">
+                <a href="./dashboard.html" class="btn btn-sm btn-primary">
+                  Go to My Learning &rarr;
+                </a>
+              </div>
+            </div>
+          </div>
+        `;
+      }
     });
   }
 }
 
-// Auto-initialize when loaded as the main module script
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initCourseDetails);
-} else {
-  initCourseDetails();
+// Auto-initialize when loaded as a standalone script (if not managed by main.js router)
+if (typeof window !== "undefined" && !window.__learnup_main_loaded) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      if (!window.__learnup_main_loaded && document.body && document.body.dataset.page === "course-details") {
+        initCourseDetails();
+      }
+    });
+  } else if (document.body && document.body.dataset.page === "course-details") {
+    initCourseDetails();
+  }
 }
